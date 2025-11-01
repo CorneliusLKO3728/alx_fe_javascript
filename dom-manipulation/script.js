@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
   }
-  function addQuote() {
+  function createAddQuoteForm() {
     const text = newQuoteText.value.trim();
     const category = newQuoteCategory.value.trim();
 
