@@ -143,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
         quotes = serverQuotes.slice();
         saveLocalQuotes();
         populateCategories();
-        showSyncNotification("Data synced successfully (no conflicts).", false);
+        showSyncNotification("Quotes synced with server!", false);
       }
     } catch (err) {
       console.error("Error fetching from server:", err);
