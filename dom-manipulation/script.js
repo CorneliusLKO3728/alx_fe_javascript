@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return { serverOnly, localOnly };
   }
 
-  async function syncWithServer() {
+  async function fetchQuotesFromServer() {
     if (!SERVER_URL || SERVER_URL.includes('example.com')) {
       return;
     }
@@ -244,7 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
     showRandomQuote();
   }
   async function syncNow() {
-    await syncWithServer();
+    await fetchQuotesFromServer();
     populateCategories();
     showRandomOrLast();
   }
@@ -252,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let syncTimer = null;
   function startAutoSync() {
     if (syncTimer) clearInterval(syncTimer);
-    syncTimer = setInterval(() => syncWithServer(), SYNC_INTERVAL_MS);
+    syncTimer = setInterval(() => fetchQuotesFromServer(), SYNC_INTERVAL_MS);
   }
   if (showQuoteButton) showQuoteButton.addEventListener('click', showRandomQuote);
   if (addQuoteButton) addQuoteButton.addEventListener('click', createAddQuoteForm);
