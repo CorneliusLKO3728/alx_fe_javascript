@@ -1,6 +1,6 @@
 
 document.addEventListener('DOMContentLoaded', () => {
-  const SERVER_URL = 'https://example.com/api/quotes'; 
+  const SERVER_URL = 'https://jsonplaceholder.typicode.com/posts';
 
   const quoteDisplay = document.getElementById('quoteDisplay');
   const showQuoteButton = document.getElementById('newQuote');
@@ -29,7 +29,8 @@ document.addEventListener('DOMContentLoaded', () => {
     { text: "If you set your goals ridiculously high and it’s a failure, you will fail above everyone else’s success.", category: "Motivation" },
   ];
 
-  let lastSyncConflicts = null; 
+  let lastSyncConflicts = null;
+
   function escapeHtml(str) {
     return String(str)
       .replace(/&/g, "&amp;")
@@ -60,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function showRandomQuote() {
     let filtered = quotes;
     const selectedCategory = categoryFilter ? categoryFilter.value : 'all';
-    if (selectedCategory && selectedCategory !== 'all') filtered = quotes.filter(q => q.category === selectedCategory);
+    if (selectedCategory !== 'all') filtered = quotes.filter(q => q.category === selectedCategory);
     if (!Array.isArray(filtered) || filtered.length === 0) {
       quoteDisplay.innerHTML = "<p>No quotes available in this category.</p>";
       return;
@@ -77,49 +78,33 @@ document.addEventListener('DOMContentLoaded', () => {
   function createAddQuoteForm() {
     const text = newQuoteText.value.trim();
     const category = newQuoteCategory.value.trim();
-    if (!text || !category) { alert("Please enter both a quote and a category."); return; }
+    if (!text || !category) {
+      alert("Please enter both a quote and a category.");
+      return;
+    }
 
     const newQuote = { text, category };
     quotes.push(newQuote);
     saveLocalQuotes();
     populateCategories();
-    newQuoteText.value = "";
-    newQuoteCategory.value = "";
     quoteDisplay.innerHTML = `<p>"${escapeHtml(text)}"</p><small><em>— ${escapeHtml(category)}</em></small>`;
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(newQuote));
+    postQuoteToServer(newQuote);
   }
-  function exportQuotes() {
-    const data = JSON.stringify(quotes, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'quotes.json';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+
+  async function postQuoteToServer(quote) {
+    try {
+      await fetch(SERVER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(quote)
+      });
+      console.log('Quote synced to server:', quote);
+    } catch (error) {
+      console.warn('Failed to sync new quote:', error);
+    }
   }
-  function importFromJsonFile(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const imported = JSON.parse(e.target.result);
-        if (!Array.isArray(imported)) throw new Error('Invalid');
-        const valid = imported.filter(it => it && typeof it.text === 'string' && typeof it.category === 'string');
-        if (valid.length === 0) { alert('No valid quotes found.'); return; }
-        quotes.push(...valid);
-        saveLocalQuotes();
-        populateCategories();
-        alert(`Imported ${valid.length} quotes.`);
-      } catch (err) {
-        alert('Import failed: invalid JSON.');
-      }
-    };
-    reader.readAsText(file);
-  }
+
   function normalizeQuote(q) {
     return `${(q.text || '').trim()}||${(q.category || '').trim()}`.toLowerCase();
   }
@@ -127,12 +112,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function detectConflicts(serverQuotes, localQuotes) {
     const sMap = new Map();
     serverQuotes.forEach(q => sMap.set(normalizeQuote(q), q));
-
     const lMap = new Map();
     localQuotes.forEach(q => lMap.set(normalizeQuote(q), q));
 
     const serverOnly = [];
     const localOnly = [];
+
     sMap.forEach((val, key) => { if (!lMap.has(key)) serverOnly.push(val); });
     lMap.forEach((val, key) => { if (!sMap.has(key)) localOnly.push(val); });
 
@@ -140,38 +125,34 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function fetchQuotesFromServer() {
-    if (!SERVER_URL || SERVER_URL.includes('example.com')) {
-      return;
-    }
-
     try {
-      const resp = await fetch(SERVER_URL, { cache: 'no-store' });
-      if (!resp.ok) throw new Error('Network error');
-      const serverQuotes = await resp.json();
-      if (!Array.isArray(serverQuotes)) throw new Error('Invalid server data');
+      const response = await fetch(SERVER_URL);
+      const data = await response.json();
+      const serverQuotes = data.slice(0, 10).map(p => ({
+        text: p.title,
+        category: "Server"
+      }));
+
       const diff = detectConflicts(serverQuotes, quotes);
       const hasConflicts = diff.serverOnly.length > 0 || diff.localOnly.length > 0;
 
-      if (!hasConflicts) {
-        if (JSON.stringify(serverQuotes) !== JSON.stringify(quotes)) {
-          quotes = serverQuotes.slice();
-          saveLocalQuotes();
-          populateCategories();
-          showSyncNotification('Data synced from server (no conflicts).', false);
-        }
-        return;
+      if (hasConflicts) {
+        lastSyncConflicts = diff;
+        showSyncNotification(`Conflicts detected: ${diff.serverOnly.length} from server, ${diff.localOnly.length} local.`, true);
+      } else {
+        quotes = serverQuotes.slice();
+        saveLocalQuotes();
+        populateCategories();
+        showSyncNotification("Data synced successfully (no conflicts).", false);
       }
-      lastSyncConflicts = diff;
-      const msgParts = [];
-      if (diff.serverOnly.length) msgParts.push(`${diff.serverOnly.length} quote(s) from server`);
-      if (diff.localOnly.length) msgParts.push(`${diff.localOnly.length} local-only quote(s)`);
-      showSyncNotification(`Sync detected changes: ${msgParts.join(' and ')}.`, true);
-      quotes = serverQuotes.slice();
-      saveLocalQuotes();
-      populateCategories();
     } catch (err) {
-      console.error('Sync failed:', err);
+      console.error("Error fetching from server:", err);
     }
+  }
+
+  async function syncQuotes() {
+    await fetchQuotesFromServer();
+    populateCategories();
   }
 
   function showSyncNotification(message, hasConflicts) {
@@ -186,88 +167,67 @@ document.addEventListener('DOMContentLoaded', () => {
     syncNotification.style.display = 'none';
   }
 
-  acceptServerBtn && acceptServerBtn.addEventListener('click', () => {
+  acceptServerBtn?.addEventListener('click', () => {
     hideSyncNotification();
     if (lastSyncConflicts) {
+      quotes = quotes.concat(lastSyncConflicts.serverOnly);
+      saveLocalQuotes();
       lastSyncConflicts = null;
-    } else {
-      syncWithServer();
     }
-    populateCategories();
-    showRandomOrLast();
+    showRandomQuote();
   });
 
-  keepLocalBtn && keepLocalBtn.addEventListener('click', () => {
+  keepLocalBtn?.addEventListener('click', () => {
     hideSyncNotification();
     lastSyncConflicts = null;
-    saveLocalQuotes(); 
-    populateCategories();
-    showRandomOrLast();
+    saveLocalQuotes();
+    showRandomQuote();
   });
 
-  viewConflictsBtn && viewConflictsBtn.addEventListener('click', () => {
+  viewConflictsBtn?.addEventListener('click', () => {
     conflictsList.innerHTML = '';
-    const c = lastSyncConflicts;
-    if (!c) {
-      conflictsList.textContent = 'No conflicts to show.';
+    if (!lastSyncConflicts) {
+      conflictsList.textContent = 'No conflicts.';
     } else {
-      const makeSection = (title, arr) => {
-        const h = document.createElement('h4'); h.textContent = `${title} (${arr.length})`; conflictsList.appendChild(h);
-        if (arr.length === 0) {
-          const p = document.createElement('p'); p.textContent = 'None'; conflictsList.appendChild(p); return;
-        }
-        arr.forEach(q => {
-          const div = document.createElement('div');
-          div.style.padding = '6px 0';
-          div.innerHTML = `<strong>${escapeHtml(q.text)}</strong> <small>— ${escapeHtml(q.category)}</small>`;
-          conflictsList.appendChild(div);
-        });
-      };
-      makeSection('Server-only quotes', c.serverOnly);
-      makeSection('Local-only quotes', c.localOnly);
+      const { serverOnly, localOnly } = lastSyncConflicts;
+      conflictsList.innerHTML += `<h4>Server-only Quotes (${serverOnly.length})</h4>`;
+      serverOnly.forEach(q => conflictsList.innerHTML += `<p>${escapeHtml(q.text)} — ${escapeHtml(q.category)}</p>`);
+      conflictsList.innerHTML += `<h4>Local-only Quotes (${localOnly.length})</h4>`;
+      localOnly.forEach(q => conflictsList.innerHTML += `<p>${escapeHtml(q.text)} — ${escapeHtml(q.category)}</p>`);
     }
     conflictsModal.style.display = 'block';
   });
 
-  closeConflictsBtn && closeConflictsBtn.addEventListener('click', () => {
+  closeConflictsBtn?.addEventListener('click', () => {
     conflictsModal.style.display = 'none';
   });
-  function showRandomOrLast() {
-    const last = sessionStorage.getItem(SESSION_KEY);
-    if (last) {
-      try {
-        const q = JSON.parse(last);
-        quoteDisplay.innerHTML = `<p>"${escapeHtml(q.text)}"</p><small><em>— ${escapeHtml(q.category)}</em></small>`;
-        return;
-      } catch {}
-    }
-    showRandomQuote();
-  }
-  async function syncNow() {
-    await fetchQuotesFromServer();
-    populateCategories();
-    showRandomOrLast();
-  }
-  const SYNC_INTERVAL_MS = 60 * 1000;
-  let syncTimer = null;
-  function startAutoSync() {
-    if (syncTimer) clearInterval(syncTimer);
-    syncTimer = setInterval(() => fetchQuotesFromServer(), SYNC_INTERVAL_MS);
-  }
-  if (showQuoteButton) showQuoteButton.addEventListener('click', showRandomQuote);
-  if (addQuoteButton) addQuoteButton.addEventListener('click', createAddQuoteForm);
-  if (exportBtn) exportBtn.addEventListener('click', exportQuotes);
-  if (importFile) importFile.addEventListener('change', importFromJsonFile);
-  if (categoryFilter) categoryFilter.addEventListener('change', () => {
-    localStorage.setItem(FILTER_KEY, categoryFilter.value);
-    showRandomOrLast();
+
+  setInterval(syncQuotes, 60000);
+
+  showQuoteButton?.addEventListener('click', showRandomQuote);
+  addQuoteButton?.addEventListener('click', createAddQuoteForm);
+  exportBtn?.addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(quotes)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'quotes.json';
+    a.click();
+    URL.revokeObjectURL(url);
   });
+  importFile?.addEventListener('change', e => {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      const imported = JSON.parse(reader.result);
+      quotes.push(...imported);
+      saveLocalQuotes();
+      populateCategories();
+    };
+    reader.readAsText(file);
+  });
+
   populateCategories();
-  showRandomOrLast();
-  if (SERVER_URL && !SERVER_URL.includes('example.com')) {
-    syncNow();
-    startAutoSync();
-  } else {
-    console.info('Server sync disabled: set SERVER_URL to enable auto-sync.');
-  }
+  showRandomQuote();
+  syncQuotes();
 });
